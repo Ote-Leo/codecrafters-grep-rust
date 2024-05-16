@@ -9,10 +9,6 @@ use std::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pattern {
-    /// For patterns that start with a `^`, (i.e. try to match once)
-    ///
-    /// HACK: think of something smarter
-    line_beginning: bool,
     tokens: Vec<PatternToken>,
 }
 
@@ -29,6 +25,10 @@ enum PatternToken {
     Within(Vec<char>),
     /// Match any except `[^...]`
     Except(Vec<char>),
+    /// Match line beginning, corresponds to `^` at the beginning of the pattern.
+    LineBeginning,
+    /// Match line ending, corresponds to `$` at the end of the pattern.
+    LineEnding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,13 +72,12 @@ impl Pattern {
 
         let mut chars = source.as_ref().chars().peekable();
         let mut tokens: Vec<PatternToken> = vec![];
-        let mut line_beginning = false;
         // characters that can be escaped by a backslash `\`
-        const ESCAPE: &[char] = &['[', ']', '\\'];
+        const ESCAPE: &[char] = &['[', ']', '\\', '$'];
 
         if let Some(&'^') = chars.peek() {
             chars.next();
-            line_beginning = true;
+            tokens.push(LineBeginning);
         }
 
         while let Some(c) = chars.next() {
@@ -136,14 +135,12 @@ impl Pattern {
                     chars.next();
                     tokens.push(specifier(group))
                 }
+                '$' if chars.peek().is_none() => tokens.push(LineEnding),
                 c => tokens.push(Char(c)),
             }
         }
 
-        Ok(Self {
-            line_beginning,
-            tokens,
-        })
+        Ok(Self { tokens })
     }
 
     /// Determine if an input matches this pattern.
@@ -154,18 +151,24 @@ impl Pattern {
         let mut i = 0;
         let mut j = 0;
         let chars: Vec<char> = input.as_ref().chars().collect();
+        let char_count = chars.len();
 
-        while i < token_count && j < chars.len() {
+        if let Some(LineBeginning) = self.tokens.first() {
+            i += 1;
+        }
+
+        while i < token_count && j < char_count {
             let c = chars[j];
+            let token = &self.tokens[i];
 
-            match (&self.tokens[i], c) {
+            match (token, c) {
                 (AnyDigit, d) if d.is_digit(10) => i += 1,
                 (AlphaNumeric, w) if w.is_alphanumeric() || w == '_' => i += 1,
                 (Char(a), b) if *a == b => i += 1,
                 (Within(cs), c) if cs.contains(&c) => i += 1,
                 (Except(cs), c) if !cs.contains(&c) => i += 1,
                 // `line_beginning` doesn't provide any other chances
-                _ if self.line_beginning => return false,
+                (LineBeginning, _) => return false,
                 // the beginning doesn't match
                 _ if i == 0 => j += 1,
                 // try matching the pattern from the beginning
@@ -178,13 +181,20 @@ impl Pattern {
             j += 1;
         }
 
-        // there are some pattern tokens that haven't been consumed, thus the input doesn't match
-        // the pattern
-        if i < token_count {
-            false
-        // all tokens have been consumed, thus the input matches the pattern
-        } else {
+        let line_ending = if let Some(LineEnding) = self.tokens.last() {
+            i += 1;
             true
+        } else {
+            false
+        };
+
+        let consumed_tokens = i >= token_count;
+        let consumed_input = j >= char_count;
+
+        if line_ending {
+            consumed_input && consumed_tokens
+        } else {
+            consumed_tokens
         }
     }
 }
@@ -195,10 +205,6 @@ impl Display for Pattern {
         use PatternToken::*;
 
         let mut pattern = String::new();
-
-        if self.line_beginning {
-            pattern.push('^');
-        }
 
         for token in self.tokens.iter() {
             match token {
@@ -215,6 +221,8 @@ impl Display for Pattern {
                     cs.iter().for_each(|&c| pattern.push(c));
                     pattern.push(']');
                 }
+                LineBeginning => pattern.push('^'),
+                LineEnding => pattern.push('$'),
             }
         }
 
@@ -242,7 +250,7 @@ fn main() -> anyhow::Result<()> {
 
     stdin().read_line(&mut input_line)?;
 
-    if !pattern.matches(&input_line) {
+    if !pattern.matches(&input_line.trim_end()) {
         exit(1)
     }
 
