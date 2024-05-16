@@ -23,6 +23,8 @@ enum PatternToken {
     AlphaNumeric,
     /// Match any within `[...]`
     Within(Vec<char>),
+    /// Match any except `[^...]`
+    Except(Vec<char>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +83,15 @@ impl Pattern {
                     None => return Err(IncompleteCard),
                 },
                 '[' => {
+                    let specifier = match chars.peek() {
+                        Some('^') => {
+                            chars.next();
+                            Except
+                        }
+                        Some(_) => Within,
+                        None => return Err(OpenGroupSpecifier),
+                    };
+
                     let mut n = 0;
                     let mut group = chars.clone();
 
@@ -113,7 +124,7 @@ impl Pattern {
 
                     // skipping the `]`
                     chars.next();
-                    tokens.push(Within(group))
+                    tokens.push(specifier(group))
                 }
                 c => tokens.push(Char(c)),
             }
@@ -141,6 +152,7 @@ impl Pattern {
                 (AlphaNumeric, w) if w.is_alphanumeric() || w == '_' => i += 1,
                 (Char(a), b) if *a == b => i += 1,
                 (Within(cs), c) if cs.contains(&c) => i += 1,
+                (Except(cs), c) if !cs.contains(&c) => i += 1,
                 _ => i = 0,
             }
         }
@@ -169,6 +181,11 @@ impl Display for Pattern {
                 AlphaNumeric => pattern.push_str("\\w"),
                 Within(cs) => {
                     pattern.push('[');
+                    cs.iter().for_each(|&c| pattern.push(c));
+                    pattern.push(']');
+                }
+                Except(cs) => {
+                    pattern.push_str("[^");
                     cs.iter().for_each(|&c| pattern.push(c));
                     pattern.push(']');
                 }
