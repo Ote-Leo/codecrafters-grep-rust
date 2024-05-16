@@ -19,6 +19,8 @@ enum PatternToken {
     Char(char),
     /// Match any digit
     AnyDigit,
+    /// Match any alpha numeric character (i.e. `[a-zA-z0-9_]`)
+    AlphaNumeric,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ParseError {
@@ -58,6 +60,7 @@ impl Pattern {
                 '\\' => match chars.next() {
                     Some(c) => match c {
                         'd' => tokens.push(AnyDigit),
+                        'w' => tokens.push(AlphaNumeric),
                         '\\' => tokens.push(Char('\\')),
                         c => return Err(UnknownCard(c)),
                     },
@@ -86,6 +89,7 @@ impl Pattern {
 
             match (&self.tokens[i], c) {
                 (AnyDigit, d) if d.is_digit(10) => i += 1,
+                (AlphaNumeric, w) if w.is_alphanumeric() || w == '_' => i += 1,
                 (Char(a), b) if *a == b => i += 1,
                 _ => i = 0,
             }
@@ -112,6 +116,7 @@ impl Display for Pattern {
             match token {
                 Char(c) => pattern.push(*c),
                 AnyDigit => pattern.push_str("\\d"),
+                AlphaNumeric => pattern.push_str("\\w"),
             }
         }
 
