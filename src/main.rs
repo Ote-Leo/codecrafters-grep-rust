@@ -9,6 +9,10 @@ use std::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pattern {
+    /// For patterns that start with a `^`, (i.e. try to match once)
+    ///
+    /// HACK: think of something smarter
+    line_beginning: bool,
     tokens: Vec<PatternToken>,
 }
 
@@ -68,8 +72,14 @@ impl Pattern {
 
         let mut chars = source.as_ref().chars().peekable();
         let mut tokens: Vec<PatternToken> = vec![];
+        let mut line_beginning = false;
         // characters that can be escaped by a backslash `\`
         const ESCAPE: &[char] = &['[', ']', '\\'];
+
+        if let Some(&'^') = chars.peek() {
+            chars.next();
+            line_beginning = true;
+        }
 
         while let Some(c) = chars.next() {
             match c {
@@ -130,7 +140,10 @@ impl Pattern {
             }
         }
 
-        Ok(Self { tokens })
+        Ok(Self {
+            line_beginning,
+            tokens,
+        })
     }
 
     /// Determine if an input matches this pattern.
@@ -151,6 +164,8 @@ impl Pattern {
                 (Char(a), b) if *a == b => i += 1,
                 (Within(cs), c) if cs.contains(&c) => i += 1,
                 (Except(cs), c) if !cs.contains(&c) => i += 1,
+                // `line_beginning` doesn't provide any other chances
+                _ if self.line_beginning => return false,
                 // the beginning doesn't match
                 _ if i == 0 => j += 1,
                 // try matching the pattern from the beginning
