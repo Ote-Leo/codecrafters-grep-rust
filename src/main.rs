@@ -49,7 +49,7 @@ impl Display for ParseError {
             ParseError::IncompleteCard => "flag '\\' isn't followed by any identifier".fmt(f),
             ParseError::UnknownCard(c) => format!("unknown flag identifier {c}").fmt(f),
             ParseError::OpenGroupSpecifier => {
-                format!("open group specifiers `[` must be closed with a `]`").fmt(f)
+                "open group specifiers `[` must be closed with a `]`".fmt(f)
             }
         }
     }
