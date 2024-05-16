@@ -21,11 +21,20 @@ enum PatternToken {
     AnyDigit,
     /// Match any alpha numeric character (i.e. `[a-zA-z0-9_]`)
     AlphaNumeric,
+    /// Match any within `[...]`
+    Within(Vec<char>),
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ParseError {
+    /// Found `\` handing alone
     IncompleteCard,
+
+    /// Found `\c` where `c` is not a known card
     UnknownCard(char),
+
+    /// Found `[` without a closing `]`
+    OpenGroupSpecifier,
 }
 
 impl Display for ParseError {
@@ -33,6 +42,9 @@ impl Display for ParseError {
         match self {
             ParseError::IncompleteCard => "flag '\\' isn't followed by any identifier".fmt(f),
             ParseError::UnknownCard(c) => format!("unknown flag identifier {c}").fmt(f),
+            ParseError::OpenGroupSpecifier => {
+                format!("open group specifiers `[` must be closed with a `]`").fmt(f)
+            }
         }
     }
 }
@@ -54,6 +66,8 @@ impl Pattern {
 
         let mut chars = source.as_ref().chars().peekable();
         let mut tokens: Vec<PatternToken> = vec![];
+        // characters that can be escaped by a backslash `\`
+        const ESCAPE: &[char] = &['[', ']', '\\'];
 
         while let Some(c) = chars.next() {
             match c {
@@ -61,11 +75,46 @@ impl Pattern {
                     Some(c) => match c {
                         'd' => tokens.push(AnyDigit),
                         'w' => tokens.push(AlphaNumeric),
-                        '\\' => tokens.push(Char('\\')),
+                        c if ESCAPE.contains(&c) => tokens.push(Char(c)),
                         c => return Err(UnknownCard(c)),
                     },
                     None => return Err(IncompleteCard),
                 },
+                '[' => {
+                    let mut n = 0;
+                    let mut group = chars.clone();
+
+                    // look for a closing bracket and store in `n`
+                    loop {
+                        match group.next() {
+                            Some(c) => {
+                                match c {
+                                    '\\' => match group.next() {
+                                        // Two for the `\` and the escaped
+                                        Some(c) if ESCAPE.contains(&c) => n += 2,
+                                        // All cards lose their power inside the group
+                                        _ => return Err(IncompleteCard),
+                                    },
+                                    c if c != ']' => n += 1,
+                                    // `n` is the index of `]`
+                                    _ => break,
+                                }
+                            }
+                            None => return Err(OpenGroupSpecifier),
+                        }
+                    }
+
+                    let mut group = vec![];
+
+                    // collect everything that isn't `]`
+                    for _ in 0..n {
+                        group.push(chars.next().expect("gauranteed to exist"));
+                    }
+
+                    // skipping the `]`
+                    chars.next();
+                    tokens.push(Within(group))
+                }
                 c => tokens.push(Char(c)),
             }
         }
@@ -91,6 +140,7 @@ impl Pattern {
                 (AnyDigit, d) if d.is_digit(10) => i += 1,
                 (AlphaNumeric, w) if w.is_alphanumeric() || w == '_' => i += 1,
                 (Char(a), b) if *a == b => i += 1,
+                (Within(cs), c) if cs.contains(&c) => i += 1,
                 _ => i = 0,
             }
         }
@@ -117,6 +167,11 @@ impl Display for Pattern {
                 Char(c) => pattern.push(*c),
                 AnyDigit => pattern.push_str("\\d"),
                 AlphaNumeric => pattern.push_str("\\w"),
+                Within(cs) => {
+                    pattern.push('[');
+                    cs.iter().for_each(|&c| pattern.push(c));
+                    pattern.push(']');
+                }
             }
         }
 
