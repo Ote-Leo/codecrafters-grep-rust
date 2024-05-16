@@ -139,13 +139,11 @@ impl Pattern {
 
         let token_count = self.tokens.len();
         let mut i = 0;
-        let mut chars = input.as_ref().chars();
+        let mut j = 0;
+        let chars: Vec<char> = input.as_ref().chars().collect();
 
-        while let Some(c) = chars.next() {
-            // all tokens have been consumed
-            if i >= token_count {
-                break;
-            }
+        while i < token_count && j < chars.len() {
+            let c = chars[j];
 
             match (&self.tokens[i], c) {
                 (AnyDigit, d) if d.is_digit(10) => i += 1,
@@ -153,8 +151,16 @@ impl Pattern {
                 (Char(a), b) if *a == b => i += 1,
                 (Within(cs), c) if cs.contains(&c) => i += 1,
                 (Except(cs), c) if !cs.contains(&c) => i += 1,
-                _ => i = 0,
+                // the beginning doesn't match
+                _ if i == 0 => j += 1,
+                // try matching the pattern from the beginning
+                _ => {
+                    i = 0;
+                    continue;
+                }
             }
+
+            j += 1;
         }
 
         // there are some pattern tokens that haven't been consumed, thus the input doesn't match
@@ -174,6 +180,11 @@ impl Display for Pattern {
         use PatternToken::*;
 
         let mut pattern = String::new();
+
+        if self.line_beginning {
+            pattern.push('^');
+        }
+
         for token in self.tokens.iter() {
             match token {
                 Char(c) => pattern.push(*c),
