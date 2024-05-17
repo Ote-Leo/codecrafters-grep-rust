@@ -8,7 +8,7 @@ use std::{
 };
 
 /// Characters that can be escaped by a backslash `\`
-const ESCAPE: &[char] = &['[', ']', '\\', '$'];
+const ESCAPE: &[char] = &['[', ']', '\\', '$', '.'];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pattern {
@@ -20,8 +20,10 @@ struct Pattern {
 enum PatternToken {
     /// Match literal character
     Char(char),
-    /// Match any digit
+    /// Match any digit `\d`
     AnyDigit,
+    /// Match anything `.`
+    Any,
     /// Match any alpha numeric character (i.e. `[a-zA-z0-9_]`)
     AlphaNumeric,
     /// Match any within `[...]`
@@ -136,6 +138,7 @@ impl Pattern {
                     chars.next();
                     tokens.push(specifier(group))
                 }
+                '.' => tokens.push(Any),
                 '$' if chars.peek().is_none() => tokens.push(LineEnding),
                 c => tokens.push(Char(c)),
             }
@@ -173,6 +176,11 @@ impl Pattern {
             print!("tokens[{i}], chars[{j}]\t");
 
             match (token, c) {
+                (Any, _) => {
+                    #[cfg(feature = "verbose")]
+                    println!("{token:?} <=> {c:?}");
+                    i += 1
+                }
                 (AnyDigit, d) if d.is_digit(10) => {
                     #[cfg(feature = "verbose")]
                     println!("{token:?} <=> {d:?}");
@@ -255,6 +263,7 @@ impl Display for Pattern {
                     }
                     pattern.push(*c)
                 }
+                Any => pattern.push('.'),
                 AnyDigit => pattern.push_str("\\d"),
                 AlphaNumeric => pattern.push_str("\\w"),
                 Within(cs) => {
