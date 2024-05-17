@@ -376,15 +376,14 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
                 continue;
             }
             // the beginning doesn't match
-            _ if i == 0 => {
+            (_t, _c) if i == 0 => {
                 #[cfg(feature = "verbose")]
-                println!("advancing...");
-                j += 1
+                println!("{_t:?} <!=> {_c:?}, advancing...");
             }
             // try matching the pattern from the beginning
-            _ => {
+            (_t, _c) => {
                 #[cfg(feature = "verbose")]
-                println!("trying pattern beginning");
+                println!("{_t:?} <!=> {_c:?}, trying pattern beginning");
                 i = 0;
                 continue;
             }
