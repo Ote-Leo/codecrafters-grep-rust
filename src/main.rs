@@ -154,6 +154,13 @@ impl Pattern {
         let chars: Vec<char> = input.as_ref().chars().collect();
         let char_count = chars.len();
 
+        #[cfg(feature = "verbose")]
+        {
+            println!("Matching");
+            println!("0 <= i < {token_count}, 0 <= j < {char_count}");
+            println!("");
+        }
+
         if let Some(LineBeginning) = self.tokens.first() {
             i += 1;
         }
@@ -162,21 +169,56 @@ impl Pattern {
             let c = chars[j];
             let token = &self.tokens[i];
 
+            #[cfg(feature = "verbose")]
+            print!("tokens[{i}], chars[{j}]\t");
+
             match (token, c) {
-                (AnyDigit, d) if d.is_digit(10) => i += 1,
-                (AlphaNumeric, w) if w.is_alphanumeric() || w == '_' => i += 1,
-                (Char(a), b) if *a == b => i += 1,
-                (Within(cs), c) if cs.contains(&c) => i += 1,
-                (Except(cs), c) if !cs.contains(&c) => i += 1,
-                (LineBeginning | LineEnding, '\n') => i += 1,
+                (AnyDigit, d) if d.is_digit(10) => {
+                    #[cfg(feature = "verbose")]
+                    println!("{token:?} <=> {d:?}");
+                    i += 1
+                }
+                (AlphaNumeric, w) if w.is_alphanumeric() || w == '_' => {
+                    #[cfg(feature = "verbose")]
+                    println!("{token:?} <=> {w:?}");
+                    i += 1
+                }
+                (Char(a), b) if *a == b => {
+                    #[cfg(feature = "verbose")]
+                    println!("{token:?} <=> {b:?}");
+                    i += 1
+                }
+                (Within(cs), c) if cs.contains(&c) => {
+                    #[cfg(feature = "verbose")]
+                    println!("{token:?} <=> {c:?}");
+                    i += 1
+                }
+                (Except(cs), c) if !cs.contains(&c) => {
+                    #[cfg(feature = "verbose")]
+                    println!("{token:?} <=> {c:?}");
+                    i += 1
+                }
+                (LineBeginning | LineEnding, '\n') => {
+                    #[cfg(feature = "verbose")]
+                    println!("{token:?} <=> '\\n'");
+                    i += 1
+                }
                 (LineEnding, '\r') if chars.get(j + 1).map(|&c| c == '\n').unwrap_or(false) => {
+                    #[cfg(feature = "verbose")]
+                    println!("{token:?} <=>  '\\r\\n'");
                     i += 1;
                     j += 1; // accounting for the '\r'
                 }
                 // the beginning doesn't match
-                _ if i == 0 => j += 1,
+                _ if i == 0 => {
+                    #[cfg(feature = "verbose")]
+                    println!("advancing...");
+                    j += 1
+                }
                 // try matching the pattern from the beginning
                 _ => {
+                    #[cfg(feature = "verbose")]
+                    println!("trying pattern beginning");
                     i = 0;
                     continue;
                 }
@@ -185,7 +227,16 @@ impl Pattern {
             j += 1;
         }
 
-        i >= token_count // consumed tokens
+        let consumed_tokens = i >= token_count;
+
+        #[cfg(feature = "verbose")]
+        if consumed_tokens {
+            println!("MATCH");
+        } else {
+            println!("NO MATCH");
+        }
+
+        consumed_tokens
     }
 }
 
@@ -244,6 +295,15 @@ fn main() -> anyhow::Result<()> {
     let mut input_line = String::new();
 
     stdin().read_line(&mut input_line)?;
+
+    #[cfg(feature = "verbose")]
+    {
+        println!("");
+        println!("pattern tokens:  {pattern:?}");
+        println!("pattern display: {pattern}");
+        println!("input:           {input_line:?}");
+        println!("");
+    }
 
     if !pattern.matches(&input_line) {
         exit(1)
