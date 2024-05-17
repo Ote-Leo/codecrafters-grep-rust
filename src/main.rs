@@ -188,48 +188,65 @@ impl Pattern {
 impl Display for Pattern {
     /// Display the original source of the pattern
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use PatternToken::*;
-
-        let mut pattern = String::new();
-
         for token in self.tokens.iter() {
-            match token {
-                Char(c) => {
-                    if ESCAPE.contains(c) {
-                        pattern.push('\\');
-                    }
-                    pattern.push(*c)
+            token.fmt(f)?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for PatternToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use PatternToken::*;
+        match self {
+            Char(c) => {
+                if ESCAPE.contains(c) {
+                    '\\'.fmt(f)?;
                 }
-                Any => pattern.push('.'),
-                AnyDigit => pattern.push_str("\\d"),
-                AlphaNumeric => pattern.push_str("\\w"),
-                Within(cs) => {
-                    pattern.push('[');
-                    cs.iter().for_each(|&c| pattern.push(c));
-                    pattern.push(']');
+                c.fmt(f)
+            }
+            Any => '.'.fmt(f),
+            AnyDigit => "\\d".fmt(f),
+            AlphaNumeric => "\\w".fmt(f),
+            Within(cs) => {
+                '['.fmt(f)?;
+                for c in cs.iter() {
+                    c.fmt(f)?;
                 }
-                Except(cs) => {
-                    pattern.push_str("[^");
-                    cs.iter().for_each(|&c| pattern.push(c));
-                    pattern.push(']');
+                ']'.fmt(f)
+            }
+            Except(cs) => {
+                "[^".fmt(f)?;
+                for c in cs.iter() {
+                    c.fmt(f)?;
                 }
-                LineBeginning => pattern.push('^'),
-                LineEnding => pattern.push('$'),
-                Quantifier { min, max, inner } => {
-                    pattern.push_str(&inner.to_string());
-                    match (*min, *max) {
-                        (0, usize::MAX) => pattern.push('*'),
-                        (1, usize::MAX) => pattern.push('+'),
-                        (0, 1) => pattern.push('?'),
-                        (a, b) if a == b => pattern.push_str(&format!("{{{a}}}")),
-                        (a, usize::MAX) => pattern.push_str(&format!("{{{a},}}")),
-                        (a, b) => pattern.push_str(&format!("{{{a},{b}}}")),
-                    }
+                ']'.fmt(f)
+            }
+            LineBeginning => '^'.fmt(f),
+            LineEnding => '$'.fmt(f),
+            Quantifier { min, max, inner } => {
+                inner.to_string().fmt(f)?;
+                match (*min, *max) {
+                    (0, usize::MAX) => '*'.fmt(f),
+                    (1, usize::MAX) => '+'.fmt(f),
+                    (0, 1) => '?'.fmt(f),
+                    (a, b) if a == b => format!("{{{a}}}").fmt(f),
+                    (a, usize::MAX) => format!("{{{a},}}").fmt(f),
+                    (a, b) => format!("{{{a},{b}}}").fmt(f),
                 }
             }
         }
+    }
+}
 
-        pattern.fmt(f)
+struct SliceDisplay<'a, T: 'a>(&'a [T]);
+
+impl<'a, T: fmt::Display + 'a> fmt::Display for SliceDisplay<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for item in self.0 {
+            write!(f, "{item}")?;
+        }
+        Ok(())
     }
 }
 
@@ -247,7 +264,11 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
 
     #[cfg(feature = "verbose")]
     {
-        println!("Matching");
+        println!(
+            "\nMatching '{}' against {:?}",
+            SliceDisplay(&tokens),
+            input.as_ref().iter().collect::<String>()
+        );
         println!("0 <= i < {token_count}, 0 <= j < {char_count}");
         println!("");
     }
