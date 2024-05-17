@@ -7,6 +7,9 @@ use std::{
     str::FromStr,
 };
 
+/// Characters that can be escaped by a backslash `\`
+const ESCAPE: &[char] = &['[', ']', '\\', '$'];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pattern {
     tokens: Vec<PatternToken>,
@@ -72,8 +75,6 @@ impl Pattern {
 
         let mut chars = source.as_ref().chars().peekable();
         let mut tokens: Vec<PatternToken> = vec![];
-        // characters that can be escaped by a backslash `\`
-        const ESCAPE: &[char] = &['[', ']', '\\', '$'];
 
         if let Some(&'^') = chars.peek() {
             chars.next();
@@ -197,7 +198,12 @@ impl Display for Pattern {
 
         for token in self.tokens.iter() {
             match token {
-                Char(c) => pattern.push(*c),
+                Char(c) => {
+                    if ESCAPE.contains(c) {
+                        pattern.push('\\');
+                    }
+                    pattern.push(*c)
+                }
                 AnyDigit => pattern.push_str("\\d"),
                 AlphaNumeric => pattern.push_str("\\w"),
                 Within(cs) => {
