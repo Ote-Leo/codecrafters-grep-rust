@@ -235,10 +235,11 @@ impl Display for Pattern {
 
 /// Determine if an input matches this pattern. The output corresponds to the index at which the
 /// `pattern` have been consumed (i.e. matched)
-fn matches<P: AsRef<Pattern>, S: AsRef<[char]>>(pattern: P, input: S) -> Option<usize> {
+fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> Option<usize> {
     use PatternToken::*;
 
-    let token_count = pattern.as_ref().tokens.len();
+    let tokens = pattern.as_ref();
+    let token_count = tokens.len();
     let mut i = 0;
     let mut j = 0;
     let chars = input.as_ref();
@@ -251,22 +252,21 @@ fn matches<P: AsRef<Pattern>, S: AsRef<[char]>>(pattern: P, input: S) -> Option<
         println!("");
     }
 
-    if let Some(LineBeginning) = pattern.as_ref().tokens.first() {
+    if let Some(LineBeginning) = tokens.first() {
         i += 1;
     }
 
     while i < token_count && j < char_count {
         let c = chars[j];
-        let token = &pattern.as_ref().tokens[i];
+        let token = &tokens[i];
 
         #[cfg(feature = "verbose")]
         print!("tokens[{i}], chars[{j}]\t");
-
-        match (token, c) {
+        match (&token, c) {
             (Any, _) => {
                 #[cfg(feature = "verbose")]
                 println!("{token:?} <=> {c:?}");
-                i += 1
+                i += 1;
             }
             (AnyDigit, d) if d.is_digit(10) => {
                 #[cfg(feature = "verbose")]
@@ -278,7 +278,7 @@ fn matches<P: AsRef<Pattern>, S: AsRef<[char]>>(pattern: P, input: S) -> Option<
                 println!("{token:?} <=> {w:?}");
                 i += 1
             }
-            (Char(ref a), b) if *a == b => {
+            (Char(a), b) if *a == b => {
                 #[cfg(feature = "verbose")]
                 println!("{token:?} <=> {b:?}");
                 i += 1
@@ -305,17 +305,53 @@ fn matches<P: AsRef<Pattern>, S: AsRef<[char]>>(pattern: P, input: S) -> Option<
                 j += 1; // accounting for the '\r'
             }
             (Quantifier { min, max, inner }, _) => {
-                // match the minimum requirements
                 let (min, max) = (*min, *max);
+                // do the minimum requirement
+                let mut k = j;
+                let mut fail = false;
+
                 for _ in 0..min {
-                    let Some(k) = matches(&inner, &chars[j..]) else {
-                        todo!("this quantifier fails to match, so goto to the case of failure")
+                    let Some(m) = matches(inner.as_ref(), &chars[k..]) else {
+                        fail = true;
+                        break;
                     };
-                    j = k;
+
+                    k = m;
                 }
+
+                if fail {
+                    if i == 0 {
+                        j += 1;
+                        continue;
+                    }
+                    i = 0;
+                    continue;
+                }
+
+                // the rest of the tokens (a.k.a. epsilon transition)
+                let rest = &tokens[i + 1..];
+
                 for _ in min..max {
-                    todo!()
+                    if let Some(m) = matches(rest, &chars[k..]) {
+                        // achieved the minimum requirements and the rest of the tokens match
+                        return Some(m);
+                    }
+                    let Some(m) = matches(inner.as_ref(), &chars[k..]) else {
+                        fail = true;
+                        break;
+                    };
+
+                    k = m;
                 }
+                if fail {
+                    if i == 0 {
+                        j += 1;
+                        continue;
+                    }
+                    i = 0;
+                    continue;
+                }
+                j = k;
             }
             // the beginning doesn't match
             _ if i == 0 => {
@@ -350,7 +386,13 @@ fn matches<P: AsRef<Pattern>, S: AsRef<[char]>>(pattern: P, input: S) -> Option<
 
 impl AsRef<Pattern> for Pattern {
     fn as_ref(&self) -> &Pattern {
-        &self
+        self
+    }
+}
+
+impl AsRef<[PatternToken]> for Pattern {
+    fn as_ref(&self) -> &[PatternToken] {
+        &self.tokens
     }
 }
 
@@ -383,7 +425,7 @@ fn main() -> anyhow::Result<()> {
         println!("");
     }
 
-    if matches(pattern, input_line.chars().collect::<Vec<char>>()).is_none() {
+    if matches(pattern.tokens, input_line.chars().collect::<Vec<char>>()).is_none() {
         exit(1)
     }
 
