@@ -462,3 +462,96 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    macro_rules! succ {
+        ($pattern: literal, $($case: literal),*) => {
+            let pattern = Pattern::from_str($pattern).unwrap();
+            $(
+                assert!(matches(&pattern, $case.chars().collect::<Vec<_>>()).is_some());
+            )*
+        };
+    }
+
+    macro_rules! fail {
+        ($pattern: literal, $($case: literal),*) => {
+            let pattern = Pattern::from_str($pattern).unwrap();
+            $(
+                assert!(matches(&pattern, $case.chars().collect::<Vec<_>>()).is_none());
+            )*
+        };
+    }
+
+    #[test]
+    fn option_quantifier() {
+        succ!("ca?t", "cat", "act");
+        fail!("ca?t", "dog", "cag");
+    }
+
+    #[test]
+    fn at_least_once_quantifier() {
+        succ!("ca+t", "caaats", "cat");
+        fail!("ca+t", "act");
+    }
+
+    #[test]
+    fn line_ending() {
+        succ!("cat$", "cat", "ccat");
+        fail!("cat$", "cats");
+    }
+
+    #[test]
+    fn line_beginning() {
+        succ!("^log", "log", "logg");
+        fail!("^log", "slog");
+    }
+
+    #[test]
+    fn token_combination() {
+        succ!(r"\d apple", "sally has 3 apples", "sally has 32 apples");
+        fail!(r"\d apple", "sally has 1 orange");
+
+        succ!(
+            r"\d\d\d apple",
+            "sally has 123 apples",
+            "sally has 1234 apples"
+        );
+        fail!(r"\d\\d\\d apple", "sally has 12 apples");
+
+        succ!(r"\d \w\w\ws", "sally has 3 dogs", "sally has 4 dogs");
+        fail!(r"\d \w\w\ws", "sally has 1 dog");
+    }
+
+    #[test]
+    fn negative_character_groups() {
+        succ!("[^xyz]", "apple");
+        fail!("[^anb]", "banana");
+    }
+
+    #[test]
+    fn positive_character_groups() {
+        succ!("[abcd]", "a");
+        fail!("[abcd]", "efgh");
+    }
+
+    #[test]
+    fn alphanumeric() {
+        succ!(r"\w", "word");
+        fail!(r"\w", "$!?");
+    }
+
+    #[test]
+    fn digits() {
+        succ!(r"\d", "123");
+        fail!(r"\d", "apple");
+    }
+
+    #[test]
+    fn literals() {
+        succ!("d", "dog");
+        fail!("f", "dog");
+    }
+}
