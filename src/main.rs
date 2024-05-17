@@ -8,7 +8,7 @@ use std::{
 };
 
 /// Characters that can be escaped by a backslash `\`
-const ESCAPE: &[char] = &['[', ']', '\\', '$', '.'];
+const ESCAPE: &[char] = &['[', ']', '\\', '$', '+', '*', '?', '.'];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pattern {
@@ -34,6 +34,15 @@ enum PatternToken {
     LineBeginning,
     /// Match line ending, corresponds to `$` at the end of the pattern.
     LineEnding,
+    /// Match the embedded `pattern` accroding to the specified range.
+    Quantifier {
+        /// The minimum amount the pattern should be repeated for.
+        min: usize,
+        /// The maximum amount the pattern should be repeated for.
+        max: usize,
+        /// The pattern being quantified.
+        inner: Box<Pattern>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +55,12 @@ enum ParseError {
 
     /// Found `[` without a closing `]`
     OpenGroupSpecifier,
+
+    /// A [`quantifier`][PatternToken::Quantifier] doesn't hold a pattern
+    EmptyQuantifier {
+        /// The string representation found in the source
+        repr: String,
+    },
 }
 
 impl Display for ParseError {
@@ -55,6 +70,9 @@ impl Display for ParseError {
             ParseError::UnknownCard(c) => format!("unknown flag identifier {c}").fmt(f),
             ParseError::OpenGroupSpecifier => {
                 "open group specifiers `[` must be closed with a `]`".fmt(f)
+            }
+            ParseError::EmptyQuantifier { repr } => {
+                format!("quantifier `{repr}` doesn't hold an expression").fmt(f)
             }
         }
     }
@@ -137,6 +155,25 @@ impl Pattern {
                     // skipping the `]`
                     chars.next();
                     tokens.push(specifier(group))
+                }
+                c @ ('+' | '*' | '?') => {
+                    let (min, max) = match c {
+                        '*' => (0, usize::MAX),
+                        '+' => (1, usize::MAX),
+                        '?' => (0, 1),
+                        c => unreachable!("quantifier {c} should've been match"),
+                    };
+
+                    match tokens.pop() {
+                        Some(token) => tokens.push(Quantifier {
+                            min,
+                            max,
+                            inner: Box::new(Pattern {
+                                tokens: vec![token],
+                            }),
+                        }),
+                        None => return Err(EmptyQuantifier { repr: c.into() }),
+                    }
                 }
                 '.' => tokens.push(Any),
                 '$' if chars.peek().is_none() => tokens.push(LineEnding),
@@ -278,6 +315,17 @@ impl Display for Pattern {
                 }
                 LineBeginning => pattern.push('^'),
                 LineEnding => pattern.push('$'),
+                Quantifier { min, max, inner } => {
+                    pattern.push_str(&inner.to_string());
+                    match (*min, *max) {
+                        (0, usize::MAX) => pattern.push('*'),
+                        (1, usize::MAX) => pattern.push('+'),
+                        (0, 1) => pattern.push('?'),
+                        (a, b) if a == b => pattern.push_str(&format!("{{{a}}}")),
+                        (a, usize::MAX) => pattern.push_str(&format!("{{{a},}}")),
+                        (a, b) => pattern.push_str(&format!("{{{a},{b}}}")),
+                    }
+                }
             }
         }
 
