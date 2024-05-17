@@ -373,6 +373,7 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
                     continue;
                 }
                 j = k;
+                continue;
             }
             // the beginning doesn't match
             _ if i == 0 => {
