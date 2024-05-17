@@ -392,7 +392,12 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
         j += 1;
     }
 
+    let consumed_input = j >= char_count;
     let consumed_tokens = i >= token_count;
+
+    if consumed_input && !consumed_tokens && tokens[i] == LineEnding {
+        return Some(j);
+    }
 
     if consumed_tokens {
         #[cfg(feature = "verbose")]
