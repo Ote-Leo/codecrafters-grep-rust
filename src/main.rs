@@ -277,6 +277,9 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
         i += 1;
     }
 
+    // storing the last point of failure to backtrack to
+    let mut last_failure = 0;
+
     while i < token_count && j < char_count {
         let c = chars[j];
         let token = &tokens[i];
@@ -384,6 +387,8 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
             (_t, _c) => {
                 #[cfg(feature = "verbose")]
                 println!("{_t:?} <!=> {_c:?}, trying pattern beginning");
+                last_failure += 1;
+                j = last_failure;
                 i = 0;
                 continue;
             }
