@@ -167,8 +167,11 @@ impl Pattern {
                 (Char(a), b) if *a == b => i += 1,
                 (Within(cs), c) if cs.contains(&c) => i += 1,
                 (Except(cs), c) if !cs.contains(&c) => i += 1,
-                // `line_beginning` doesn't provide any other chances
-                (LineBeginning, _) => return false,
+                (LineBeginning | LineEnding, '\n') => i += 1,
+                (LineEnding, '\r') if chars.get(j + 1).map(|&c| c == '\n').unwrap_or(false) => {
+                    i += 1;
+                    j += 1; // accounting for the '\r'
+                }
                 // the beginning doesn't match
                 _ if i == 0 => j += 1,
                 // try matching the pattern from the beginning
@@ -181,21 +184,7 @@ impl Pattern {
             j += 1;
         }
 
-        let line_ending = if let Some(LineEnding) = self.tokens.last() {
-            i += 1;
-            true
-        } else {
-            false
-        };
-
-        let consumed_tokens = i >= token_count;
-        let consumed_input = j >= char_count;
-
-        if line_ending {
-            consumed_input && consumed_tokens
-        } else {
-            consumed_tokens
-        }
+        i >= token_count // consumed tokens
     }
 }
 
@@ -250,7 +239,7 @@ fn main() -> anyhow::Result<()> {
 
     stdin().read_line(&mut input_line)?;
 
-    if !pattern.matches(&input_line.trim_end()) {
+    if !pattern.matches(&input_line) {
         exit(1)
     }
 
