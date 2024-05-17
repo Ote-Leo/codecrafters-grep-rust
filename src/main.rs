@@ -337,7 +337,7 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
                         break;
                     };
 
-                    k = m;
+                    k += m;
                 }
 
                 if fail {
@@ -362,7 +362,7 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
                         break;
                     };
 
-                    k = m;
+                    k += m;
                 }
                 if fail {
                     if i == 0 {
