@@ -253,6 +253,14 @@ impl<'a, T: fmt::Display + 'a> fmt::Display for SliceDisplay<'a, T> {
 /// Determine if an input matches this pattern. The output corresponds to the index at which the
 /// `pattern` have been consumed (i.e. matched)
 fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> Option<usize> {
+    match_loop(pattern, input, true)
+}
+
+fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
+    pattern: P,
+    input: S,
+    advance: bool,
+) -> Option<usize> {
     use PatternToken::*;
 
     let tokens = pattern.as_ref();
@@ -335,7 +343,7 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
                 let mut fail = false;
 
                 for _ in 0..min {
-                    let Some(m) = matches(inner.as_ref(), &chars[k..]) else {
+                    let Some(m) = match_loop(inner.as_ref(), &chars[k..], false) else {
                         fail = true;
                         break;
                     };
@@ -356,11 +364,11 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
                 let rest = &tokens[i + 1..];
 
                 for _ in min..max {
-                    if let Some(m) = matches(rest, &chars[k..]) {
+                    if let Some(m) = match_loop(rest, &chars[k..], false) {
                         // achieved the minimum requirements and the rest of the tokens match
                         return Some(m);
                     }
-                    let Some(m) = matches(inner.as_ref(), &chars[k..]) else {
+                    let Some(m) = match_loop(inner.as_ref(), &chars[k..], false) else {
                         fail = true;
                         break;
                     };
@@ -377,6 +385,11 @@ fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> 
                 }
                 j = k;
                 continue;
+            }
+            (_t, _c) if !advance => {
+                #[cfg(feature = "verbose")]
+                println!("{_t:?} <!=> {_c:?}, NO MATCH - early exiting.");
+                return None;
             }
             // the beginning doesn't match
             (_t, _c) if i == 0 => {
