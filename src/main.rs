@@ -618,6 +618,18 @@ mod test {
     }
 
     #[test]
+    fn alternation() {
+        succ!("a (cat|dog)", "a cat", "a dog");
+        fail!("a (cat|dog)", "a cow");
+    }
+
+    #[test]
+    fn wild_card() {
+        succ!("c.t", "cat", "cot");
+        fail!("c.t", "car");
+    }
+
+    #[test]
     fn option_quantifier() {
         succ!("ca?t", "cat", "act");
         fail!("ca?t", "dog", "cag");
