@@ -162,7 +162,7 @@ impl Pattern {
                     chars.next(); // skipping the `]`
                     tokens.push(specifier(group))
                 }
-                c @ ('+' | '*' | '?') => {
+                '{' => todo!("handle the case of parsing quantifiers, also you might need to update the error message of OpenGroupSpecifier"),
                 '(' => {
                     let n;
                     let mut group = chars.clone().enumerate();
