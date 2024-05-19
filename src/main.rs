@@ -8,7 +8,7 @@ use std::{
 };
 
 /// Characters that can be escaped by a backslash `\`
-const ESCAPE: &[char] = &['[', ']', '\\', '$', '+', '*', '?', '.'];
+const ESCAPE: &[char] = &['[', ']', '\\', '$', '+', '*', '?', '.', '(', ')', '|'];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pattern {
@@ -34,7 +34,7 @@ enum PatternToken {
     LineBeginning,
     /// Match line ending, corresponds to `$` at the end of the pattern.
     LineEnding,
-    /// Match the embedded `pattern` accroding to the specified range.
+    /// Match the embedded [`Pattern`] accroding to the specified range.
     Quantifier {
         /// The minimum amount the pattern should be repeated for.
         min: usize,
@@ -42,6 +42,11 @@ enum PatternToken {
         max: usize,
         /// The pattern being quantified.
         inner: Box<Pattern>,
+    },
+    /// A sequence of [`Pattern`]s to alternative between using `|` (e.g. `(p1|p2|...|pn)`)
+    Group {
+        /// The inner sequence of patterns
+        inner: Vec<Pattern>,
     },
 }
 
@@ -53,8 +58,8 @@ enum ParseError {
     /// Found `\c` where `c` is not a known card
     UnknownCard(char),
 
-    /// Found `[` without a closing `]`
-    OpenGroupSpecifier,
+    /// Found an unblanaced `[]`, `{}`, or `()`
+    UnbalancedSepcifier { open: char, close: char },
 
     /// A [`quantifier`][PatternToken::Quantifier] doesn't hold a pattern
     EmptyQuantifier {
@@ -65,13 +70,14 @@ enum ParseError {
 
 impl Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ParseError::*;
         match self {
-            ParseError::IncompleteCard => "flag '\\' isn't followed by any identifier".fmt(f),
-            ParseError::UnknownCard(c) => format!("unknown flag identifier {c}").fmt(f),
-            ParseError::OpenGroupSpecifier => {
-                "open group specifiers `[` must be closed with a `]`".fmt(f)
+            IncompleteCard => "flag '\\' isn't followed by any identifier".fmt(f),
+            UnknownCard(c) => format!("unknown flag identifier {c}").fmt(f),
+            UnbalancedSepcifier { open, close } => {
+                format!("open group specifiers `{open}` must be closed with a `{close}`").fmt(f)
             }
-            ParseError::EmptyQuantifier { repr } => {
+            EmptyQuantifier { repr } => {
                 format!("quantifier `{repr}` doesn't hold an expression").fmt(f)
             }
         }
@@ -119,29 +125,30 @@ impl Pattern {
                             Except
                         }
                         Some(_) => Within,
-                        None => return Err(OpenGroupSpecifier),
+                            None => return Err(UnbalancedSepcifier { open: '[', close: ']' }),
                     };
 
-                    let mut n = 0;
-                    let mut group = chars.clone();
+                    let n;
+                    let mut group = chars.clone().enumerate();
 
                     // look for a closing bracket and store in `n`
                     loop {
                         match group.next() {
-                            Some(c) => {
+                            Some((i, c)) => {
                                 match c {
                                     '\\' => match group.next() {
-                                        // Two for the `\` and the escaped
-                                        Some(c) if ESCAPE.contains(&c) => n += 2,
-                                        // All cards lose their power inside the group
+                                        Some((_, c)) if ESCAPE.contains(&c) => (),
                                         _ => return Err(IncompleteCard),
                                     },
-                                    c if c != ']' => n += 1,
                                     // `n` is the index of `]`
-                                    _ => break,
+                                    ']' => {
+                                        n = i;
+                                        break
+                                    }
+                                    _ => (),
                                 }
                             }
-                            None => return Err(OpenGroupSpecifier),
+                            None => return Err(UnbalancedSepcifier { open: '[', close: ']' }),
                         }
                     }
 
@@ -152,11 +159,89 @@ impl Pattern {
                         group.push(chars.next().expect("gauranteed to exist"));
                     }
 
-                    // skipping the `]`
-                    chars.next();
+                    chars.next(); // skipping the `]`
                     tokens.push(specifier(group))
                 }
                 c @ ('+' | '*' | '?') => {
+                '(' => {
+                    let n;
+                    let mut group = chars.clone().enumerate();
+                    let mut group_indecies = vec![];
+                    let mut j = 0;
+
+                    let mut brackets = vec!['('];
+
+                    // look for a closing bracket and store in `n`
+                    loop {
+                        let Some((i, c)) = group.next() else {
+                            return Err(UnbalancedSepcifier { open: '(', close: ')' });
+                        };
+
+                        if brackets.is_empty() {
+                            n = i;
+                            break;
+                        }
+
+                        match c {
+                            '\\' => match group.next() {
+                                Some((_, c)) if ESCAPE.contains(&c) => (),
+                                _ => return Err(IncompleteCard),
+                            },
+                            c @ ( '['| '('| '{' ) => brackets.push(c),
+                            c @ ( ']'| ')'| '}' ) => {
+                                let open = match c {
+                                    ']' => '[',
+                                    ')' => '(',
+                                    '}' => '{',
+                                    _ => unreachable!(),
+                                };
+
+                                match brackets.pop() {
+                                    Some(bracket) if bracket == open => (),
+                                    _ => return Err(UnbalancedSepcifier { open, close: c }),
+                                }
+
+                                if brackets.is_empty() {
+                                    // `i` is the index of `)`
+                                    n = i;
+                                    break;
+                                }
+                            }
+                            '|' if brackets.len() == 1 => {
+                                let diff = i - j;
+                                assert!(i - j > 1, "not handling empty alternatives [ `(|`, `||` or `|)` ]");
+                                group_indecies.push(diff);
+                                j = i;
+                            }
+                            _ => (),
+                        }
+                    }
+
+                    let mut inner = vec![];
+                    let mut j = 0;
+
+                    for g in group_indecies {
+                        let mut p = String::new();
+                        for _ in 0..g {
+                            p.push(chars.next().expect("gauranteed to exist"));
+                        }
+                        inner.push(Pattern::from_str(&p)?);
+                        chars.next(); // skipping the `|`
+                        j = g;
+                    }
+
+                    // collect everything that isn't `)`
+                    {
+                        let mut p = String::new();
+                        for _ in j..n - 1 {
+                            p.push(chars.next().expect("gauranteed to exist"));
+                        }
+                        inner.push(Pattern::from_str(&p)?);
+                    }
+
+                    chars.next(); // skipping the `)`
+                    tokens.push(Group { inner });
+                }                c @ ('+' | '*' | '?') => {
                     let (min, max) = match c {
                         '*' => (0, usize::MAX),
                         '+' => (1, usize::MAX),
@@ -234,6 +319,16 @@ impl Display for PatternToken {
                     (a, usize::MAX) => format!("{{{a},}}").fmt(f),
                     (a, b) => format!("{{{a},{b}}}").fmt(f),
                 }
+            }
+            Group { inner } => {
+                '('.fmt(f)?;
+                inner
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<String>>()
+                    .join("|")
+                    .fmt(f)?;
+                ')'.fmt(f)
             }
         }
     }
@@ -385,6 +480,30 @@ fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
                 }
                 j = k;
                 continue;
+            }
+            (Group { inner }, _) => {
+                let mut k = j;
+                let mut any_match = false;
+                for inner_pattern in inner.iter() {
+                    if let Some(m) = match_loop(inner_pattern, &chars[k..], false) {
+                        any_match = true;
+                        k += m;
+                        break;
+                    }
+                }
+
+                if any_match {
+                    i += 1;
+                    j = k;
+                    continue;
+                } else {
+                    if i == 0 {
+                        j += 1;
+                        continue;
+                    }
+                    i = 0;
+                    continue;
+                }
             }
             (_t, _c) if !advance => {
                 #[cfg(feature = "verbose")]
