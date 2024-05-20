@@ -223,9 +223,8 @@ impl Pattern {
 
                         match c {
                             '\\' => match group.next() {
-                                Some((_, c)) if ESCAPE.contains(&c) => (),
-                                Some((_, 'd' | 'w')) => (),
-                                _ => return Err(IncompleteCard),
+                                Some(_) => (),
+                                None => return Err(IncompleteCard),
                             },
                             c @ ( '['| '('| '{' ) => brackets.push(c),
                             c @ ( ']'| ')'| '}' ) => {
