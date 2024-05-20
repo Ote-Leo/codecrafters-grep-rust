@@ -785,6 +785,26 @@ mod test {
     }
 
     #[test]
+    fn single_backreferences() {
+        succ!(r"(cat) and \1", "cat and cat");
+        fail!(r"(cat) and \1", "cat and dog");
+        succ!(r"(\w\w\w\w \d\d\d) is doing \1 times", "grep 101 is doing grep 101 times");
+        fail!(r"(\w\w\w \d\d\d) is doing \1 times", "$?! 101 is doing $?! 101 times");
+        fail!(r"(\w\w\w\w \d\d\d) is doing \1 times", "grep yes is doing grep yes times");
+        succ!(r"([abcd]+) is \1, not [^xyz]+", "abcd is abcd, not efg");
+        fail!(r"([abcd]+) is \1, not [^xyz]+", "efgh is efgh, not efg");
+        fail!(r"([abcd]+) is \1, not [^xyz]+", "abcd is abcd, not xyz");
+        succ!(r"^(\w+) starts and ends with \1$", "this starts and ends with this");
+        fail!(r"^(this) starts and ends with \1$", "that starts and ends with this");
+        fail!(r"^(this) starts and ends with \1$", "this starts and ends with this?");
+        succ!(r"once a (drea+mer), alwaysz? a \1", "once a dreaaamer, always a dreaaamer");
+        fail!(r"once a (drea+mer), alwaysz? a \1", "once a dremer, always a dreaaamer");
+        fail!(r"once a (drea+mer), alwaysz? a \1", "once a dreaaamer, alwayszzz a dreaaamer");
+        succ!(r"(b..s|c..e) here and \1 there", "bugs here and bugs there");
+        fail!(r"(b..s|c..e) here and \1 there", "bugz here and bugs there");
+    }
+
+    #[test]
     fn alternation() {
         succ!("a (cat|dog)", "a cat", "a dog");
         fail!("a (cat|dog)", "a cow");
