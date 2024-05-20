@@ -229,7 +229,6 @@ impl Pattern {
                                 }
                             }
                             '|' if brackets.len() == 1 => {
-                                debug_assert!(group_indecies.last().map(|j|i - j > 1).unwrap_or(true), "not handling empty alternatives [ `(|`, `||` or `|)` ]");
                                 group_indecies.push(i);
                             }
                             _ => (),
