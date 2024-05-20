@@ -180,7 +180,7 @@ impl Pattern {
 
                     // collect everything that isn't `]`
                     for _ in 0..n {
-                        group.push(chars.next().expect("gauranteed to exist"));
+                        group.push(chars.next().expect("guaranteed to exist"));
                     }
 
                     chars.next(); // skipping the `]`
@@ -245,7 +245,7 @@ impl Pattern {
                     for g in group_indecies {
                         let mut p = String::new();
                         for _ in v..g {
-                            p.push(chars.next().expect("gauranteed to exist"));
+                            p.push(chars.next().expect("guaranteed to exist"));
                             v += 1;
                         }
 
@@ -266,7 +266,7 @@ impl Pattern {
                     {
                         let mut p = String::new();
                         for _ in v..n {
-                            p.push(chars.next().expect("gauranteed to exist"));
+                            p.push(chars.next().expect("guaranteed to exist"));
                         }
 
                         #[cfg(feature = "verbose")]
