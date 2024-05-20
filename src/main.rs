@@ -510,7 +510,7 @@ fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
                 println!("{indentation}{token:?} <=> {c:?}");
                 i += 1
             }
-            (Except(cs), c) if !cs.contains(&c) => {
+            (Except(cs), c) if !cs.contains(&c) && c != ',' => {
                 #[cfg(feature = "verbose")]
                 println!("{indentation}{token:?} <=> {c:?}");
                 i += 1
