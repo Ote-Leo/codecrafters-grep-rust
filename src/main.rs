@@ -9,6 +9,8 @@ use std::{
 
 /// Characters that can be escaped by a backslash `\`
 const ESCAPE: &[char] = &['[', ']', '\\', '$', '+', '*', '?', '.', '(', ')', '|'];
+#[cfg(feature = "verbose")]
+const INDENTATION: &str = "    ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pattern {
@@ -90,34 +92,56 @@ impl FromStr for Pattern {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        #[cfg(feature = "verbose")]
+        {
+            println!("Parsing {s:?}");
+            println!();
+            Self::parse(s, 1)
+        }
+        #[cfg(not(feature = "verbose"))]
         Self::parse(s)
     }
 }
 
 impl Pattern {
-    fn parse<S: AsRef<str>>(source: S) -> Result<Self, ParseError> {
+    fn parse<S: AsRef<str>>(
+        source: S,
+        #[cfg(feature = "verbose")] depth: usize,
+    ) -> Result<Self, ParseError> {
         use ParseError::*;
         use PatternToken::*;
+
+        #[cfg(feature = "verbose")]
+        let indentation = [INDENTATION].repeat(depth).join("");
 
         let mut chars = source.as_ref().chars().peekable();
         let mut tokens: Vec<PatternToken> = vec![];
 
         if let Some(&'^') = chars.peek() {
+            #[cfg(feature = "verbose")]
+            println!("{indentation}LineBeginning <=> '^'");
             chars.next();
             tokens.push(LineBeginning);
         }
 
         while let Some(c) = chars.next() {
             match c {
-                '\\' => match chars.next() {
-                    Some(c) => match c {
-                        'd' => tokens.push(AnyDigit),
-                        'w' => tokens.push(AlphaNumeric),
-                        c if ESCAPE.contains(&c) => tokens.push(Char(c)),
-                        c => return Err(UnknownCard(c)),
-                    },
-                    None => return Err(IncompleteCard),
-                },
+                '\\' => {
+                    let token = match chars.next() {
+                        Some(c) => match c {
+                            'd' => AnyDigit,
+                            'w' => AlphaNumeric,
+                            c if ESCAPE.contains(&c) => Char(c),
+                            c => return Err(UnknownCard(c)),
+                        },
+                        None => return Err(IncompleteCard),
+                    };
+
+                    #[cfg(feature = "verbose")]
+                    println!("{indentation}{token:?} <=> '{token}'");
+
+                    tokens.push(token)
+                }
                 '[' => {
                     let specifier = match chars.peek() {
                         Some('^') => {
@@ -164,27 +188,26 @@ impl Pattern {
                 }
                 '{' => todo!("handle the case of parsing quantifiers, also you might need to update the error message of OpenGroupSpecifier"),
                 '(' => {
-                    let n;
+                    let mut n = 0;
                     let mut group = chars.clone().enumerate();
                     let mut group_indecies = vec![];
-                    let mut j = 0;
 
                     let mut brackets = vec!['('];
 
                     // look for a closing bracket and store in `n`
                     loop {
+                        if brackets.is_empty() {
+                            break;
+                        }
+
                         let Some((i, c)) = group.next() else {
                             return Err(UnbalancedSepcifier { open: '(', close: ')' });
                         };
 
-                        if brackets.is_empty() {
-                            n = i;
-                            break;
-                        }
-
                         match c {
                             '\\' => match group.next() {
                                 Some((_, c)) if ESCAPE.contains(&c) => (),
+                                Some((_, 'd' | 'w')) => (),
                                 _ => return Err(IncompleteCard),
                             },
                             c @ ( '['| '('| '{' ) => brackets.push(c),
@@ -197,46 +220,62 @@ impl Pattern {
                                 };
 
                                 match brackets.pop() {
-                                    Some(bracket) if bracket == open => (),
+                                    Some(bracket) if bracket == open => {
+                                        if brackets.is_empty() {
+                                            n = i;
+                                        }
+                                    },
                                     _ => return Err(UnbalancedSepcifier { open, close: c }),
-                                }
-
-                                if brackets.is_empty() {
-                                    // `i` is the index of `)`
-                                    n = i;
-                                    break;
                                 }
                             }
                             '|' if brackets.len() == 1 => {
-                                let diff = i - j;
-                                assert!(i - j > 1, "not handling empty alternatives [ `(|`, `||` or `|)` ]");
-                                group_indecies.push(diff);
-                                j = i;
+                                debug_assert!(group_indecies.last().map(|j|i - j > 1).unwrap_or(true), "not handling empty alternatives [ `(|`, `||` or `|)` ]");
+                                group_indecies.push(i);
                             }
                             _ => (),
                         }
                     }
 
                     let mut inner = vec![];
-                    let mut j = 0;
 
+                    #[cfg(feature = "verbose")]
+                    println!("{indentation}PARSING ALTERNATIVES:");
+
+                    let mut v = 0;
                     for g in group_indecies {
                         let mut p = String::new();
-                        for _ in 0..g {
+                        for _ in v..g {
                             p.push(chars.next().expect("gauranteed to exist"));
+                            v += 1;
                         }
-                        inner.push(Pattern::from_str(&p)?);
+
+                        #[cfg(feature = "verbose")]
+                        {
+                            println!("{indentation}PARSING INNER PATTERN {p:?}:");
+                            inner.push(Pattern::parse(&p, depth + 1)?);
+                        }
+
+                        #[cfg(not(feature = "verbose"))]
+                        inner.push(Pattern::parse(&p)?);
+
                         chars.next(); // skipping the `|`
-                        j = g;
+                            v += 1;
                     }
 
                     // collect everything that isn't `)`
                     {
                         let mut p = String::new();
-                        for _ in j..n - 1 {
+                        for _ in v..n {
                             p.push(chars.next().expect("gauranteed to exist"));
                         }
-                        inner.push(Pattern::from_str(&p)?);
+
+                        #[cfg(feature = "verbose")]
+                        {
+                            println!("{indentation}PARSING INNER PATTERN {p:?}:");
+                            inner.push(Pattern::parse(&p, depth + 1)?);
+                        }
+                        #[cfg(not(feature = "verbose"))]
+                        inner.push(Pattern::parse(&p)?);
                     }
 
                     chars.next(); // skipping the `)`
@@ -253,16 +292,35 @@ impl Pattern {
                         Some(token) => tokens.push(Quantifier {
                             min,
                             max,
-                            inner: Box::new(Pattern {
-                                tokens: vec![token],
-                            }),
+                            inner: {
+                                let previous_token = vec![token];
+                                #[cfg(feature = "verbose")]
+                                {
+                                    let ts = previous_token.iter().map(|t| t.to_string()).collect::<Vec<_>>().join("");
+                                    println!("{indentation}Quantifying {ts} <=> {c:?}");
+                                }
+
+                                Box::new(Pattern { tokens: previous_token })
+                            }
                         }),
                         None => return Err(EmptyQuantifier { repr: c.into() }),
                     }
                 }
-                '.' => tokens.push(Any),
-                '$' if chars.peek().is_none() => tokens.push(LineEnding),
-                c => tokens.push(Char(c)),
+                '.' => {
+                    #[cfg(feature = "verbose")]
+                    println!("{indentation}LineEnding <=> {c:?}");
+                    tokens.push(Any)
+                }
+                '$' if chars.peek().is_none() => {
+                    #[cfg(feature = "verbose")]
+                    println!("{indentation}LineEnding <=> {c:?}");
+                    tokens.push(LineEnding)
+                }
+                c => {
+                    #[cfg(feature = "verbose")]
+                    println!("{indentation}Char({c:?}) <=> {c:?}");
+                    tokens.push(Char(c))
+                } 
             }
         }
 
