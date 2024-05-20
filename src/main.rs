@@ -794,6 +794,36 @@ mod test {
                "grep yes is doing grep yes times, and again grep yes times");
         succ!(r"(([abc]+)-([def]+)) is \1, not ([^xyz]+), \2, or \3",
                "abc-def is abc-def, not efg, abc, or def");
+        fail!(r"(([abc]+)-([def]+)) is \1, not ([^xyz]+), \2, or \3", "efg-hij is efg-hij, not klm, efg, or hij");
+        fail!(r"(([abc]+)-([def]+)) is \1, not ([^xyz]+), \2, or \3", "abc-def is abc-def, not xyz, abc, or def");
+        succ!(r"^((\w+) (\w+)) is made of \2 and \3. love \1$", "apple pie is made of apple and pie. love apple pie");
+        fail!(r"^((apple) (\w+)) is made of \2 and \3. love \1$", "pineapple pie is made of apple and pie. love apple pie");
+        fail!(r"^((\w+) (pie)) is made of \2 and \3. love \1$", "apple pie is made of apple and pie. love apple pies");
+        succ!(r"'((how+dy) (he?y) there)' is made up of '\2' and '\3'. \1", "'howwdy hey there' is made up of 'howwdy' and 'hey'. howwdy hey there");
+        fail!(r"'((how+dy) (he?y) there)' is made up of '\2' and '\3'. \1", "'hody hey there' is made up of 'hody' and 'hey'. hody hey there");
+        fail!(r"'((how+dy) (he?y) there)' is made up of '\2' and '\3'. \1", "'howwdy heeey there' is made up of 'howwdy' and 'heeey'. howwdy heeey there");
+        succ!(r"((c.t|d.g) and (f..h|b..d)), \2 with \3, \1", "cat and fish, cat with fish, cat and fish");
+        fail!(r"((c.t|d.g) and (f..h|b..d)), \2 with \3, \1", "bat and fish, bat with fish, bat and fish");
+    }
+
+    #[test]
+    fn multiple_backreferences() {
+        succ!(r"(\d+) (\w+) squares and \1 \2 circles", "3 red squares and 3 red circles");
+        fail!(r"(\d+) (\w+) squares and \1 \2 circles", "3 red squares and 4 red circles");
+        succ!(r"(\w\w\w\w) (\d\d\d) is doing \1 \2 times", "grep 101 is doing grep 101 times");
+        fail!(r"(\w\w\w) (\d\d\d) is doing \1 \2 times", "$?! 101 is doing $?! 101 times");
+        fail!(r"(\w\w\w\w) (\d\d\d) is doing \1 \2 times", "grep yes is doing grep yes times");
+        succ!(r"([abc]+)-([def]+) is \1-\2, not [^xyz]+", "abc-def is abc-def, not efg");
+        fail!(r"([abc]+)-([def]+) is \1-\2, not [^xyz]+", "efg-hij is efg-hij, not efg");
+        fail!(r"([abc]+)-([def]+) is \1-\2, not [^xyz]+", "abc-def is abc-def, not xyz");
+        succ!(r"^(\w+) (\w+), \1 and \2$", "apple pie, apple and pie");
+        fail!(r"^(apple) (\w+), \1 and \2$", "pineapple pie, pineapple and pie");
+        fail!(r"^(\w+) (pie), \1 and \2$", "apple pie, apple and pies");
+        succ!(r"(how+dy) (he?y) there, \1 \2", "howwdy hey there, howwdy hey");
+        fail!(r"(how+dy) (he?y) there, \1 \2", "hody hey there, howwdy hey");
+        fail!(r"(how+dy) (he?y) there, \1 \2", "howwdy heeey there, howwdy heeey");
+        succ!(r"(c.t|d.g) and (f..h|b..d), \1 with \2", "cat and fish, cat with fish");
+        fail!(r"(c.t|d.g) and (f..h|b..d), \1 with \2", "bat and fish, cat with fish");
     }
 
     #[test]
