@@ -602,8 +602,7 @@ fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
                 let mut k = j;
                 let mut any_match = false;
                 for inner_pattern in inner.iter() {
-
-                    let _match =  {
+                    let _match = {
                         #[cfg(feature = "verbose")]
                         { match_loop(inner_pattern, &chars[k..], false, requested_references, captured_references, depth + 1) }
                         #[cfg(not(feature = "verbose"))]
@@ -781,6 +780,20 @@ mod test {
                 assert!(matches(&pattern, $case.chars().collect::<Vec<_>>(), &references).is_none());
             )*
         };
+    }
+
+    #[test]
+    fn nested_backreferences() {
+        succ!(r"('(cat) and \2') is the same as \1", "'cat and cat' is the same as 'cat and cat'");
+        fail!(r"('(cat) and \2') is the same as \1", "'cat and cat' is the same as 'cat and dog'");
+        succ!(r"((\w\w\w\w) (\d\d\d)) is doing \2 \3 times, and again \1 times",
+               "grep 101 is doing grep 101 times, and again grep 101 times");
+        fail!(r"((\w\w\w) (\d\d\d)) is doing \2 \3 times, and again \1 times",
+               "$?! 101 is doing $?! 101 times, and again $?! 101 times");
+        fail!(r"((\w\w\w\w) (\d\d\d)) is doing \2 \3 times, and again \1 times",
+               "grep yes is doing grep yes times, and again grep yes times");
+        succ!(r"(([abc]+)-([def]+)) is \1, not ([^xyz]+), \2, or \3",
+               "abc-def is abc-def, not efg, abc, or def");
     }
 
     #[test]
