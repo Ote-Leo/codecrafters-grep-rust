@@ -1,10 +1,5 @@
 use std::{
-    env::args,
-    error::Error,
-    fmt::{self, Display},
-    io::stdin,
-    process::exit,
-    str::FromStr,
+    collections::HashMap, env::args, error::Error, fmt::{self, Display}, io::stdin, process::exit, str::FromStr
 };
 
 /// Characters that can be escaped by a backslash `\`
@@ -47,9 +42,20 @@ enum PatternToken {
     },
     /// A sequence of [`Pattern`]s to alternative between using `|` (e.g. `(p1|p2|...|pn)`)
     Group {
+        /// A reference identifier used by [`backreferences`]
+        ///
+        /// [`backreferences`]: PatternToken::BackReference
+        reference: usize,
         /// The inner sequence of patterns
         inner: Vec<Pattern>,
     },
+    /// A back-reference to a [`group`] (i.e. it must follow it); represented as `\<index>`.
+    ///
+    /// [`group`]: PatternToken::Group
+    BackReference {
+        /// A one-based index.
+        index: usize,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +74,8 @@ enum ParseError {
         /// The string representation found in the source
         repr: String,
     },
+    /// A [`backreference`][PatternToken::BackReference] has an non-positive integer index
+    InvalidBackreference(usize),
 }
 
 impl Display for ParseError {
@@ -82,30 +90,21 @@ impl Display for ParseError {
             EmptyQuantifier { repr } => {
                 format!("quantifier `{repr}` doesn't hold an expression").fmt(f)
             }
+            InvalidBackreference(index) => {
+                format!("back-references must be a positive integer, but found {index}").fmt(f)
+            }
         }
     }
 }
 
 impl Error for ParseError {}
 
-impl FromStr for Pattern {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        #[cfg(feature = "verbose")]
-        {
-            println!("Parsing {s:?}");
-            println!();
-            Self::parse(s, 1)
-        }
-        #[cfg(not(feature = "verbose"))]
-        Self::parse(s)
-    }
-}
 
 impl Pattern {
     fn parse<S: AsRef<str>>(
         source: S,
+        references: &mut Vec<usize>,
+        reference_count: &mut usize,
         #[cfg(feature = "verbose")] depth: usize,
     ) -> Result<Self, ParseError> {
         use ParseError::*;
@@ -132,6 +131,24 @@ impl Pattern {
                             'd' => AnyDigit,
                             'w' => AlphaNumeric,
                             c if ESCAPE.contains(&c) => Char(c),
+                            c if c.is_ascii_digit() => {
+                                let mut buf = String::from(c);
+                                while let Some(&d) = chars.peek() {
+                                    if d.is_ascii_digit() {
+                                        buf.push(d);
+                                        chars.next();
+                                    } else {
+                                        break
+                                    }
+                                }
+                                let index = usize::from_str(&buf).expect(&format!("huge backreference {buf}"));
+                                // TODO: adding index validation
+                                if index < 1 {
+                                    return Err(InvalidBackreference(index));
+                                }
+                                references.push(index);
+                                BackReference { index }
+                            }
                             c => return Err(UnknownCard(c)),
                         },
                         None => return Err(IncompleteCard),
@@ -239,6 +256,8 @@ impl Pattern {
 
                     #[cfg(feature = "verbose")]
                     println!("{indentation}PARSING ALTERNATIVES:");
+                    let reference = *reference_count + 1;
+                    *reference_count += 1;
 
                     let mut v = 0;
                     for g in group_indecies {
@@ -251,11 +270,11 @@ impl Pattern {
                         #[cfg(feature = "verbose")]
                         {
                             println!("{indentation}PARSING INNER PATTERN {p:?}:");
-                            inner.push(Pattern::parse(&p, depth + 1)?);
+                            inner.push(Pattern::parse(&p, references, reference_count, depth + 1)?);
                         }
 
                         #[cfg(not(feature = "verbose"))]
-                        inner.push(Pattern::parse(&p)?);
+                        inner.push(Pattern::parse(&p, references, reference_count)?);
 
                         chars.next(); // skipping the `|`
                             v += 1;
@@ -271,15 +290,16 @@ impl Pattern {
                         #[cfg(feature = "verbose")]
                         {
                             println!("{indentation}PARSING INNER PATTERN {p:?}:");
-                            inner.push(Pattern::parse(&p, depth + 1)?);
+                            inner.push(Pattern::parse(&p, references, reference_count, depth + 1)?);
                         }
                         #[cfg(not(feature = "verbose"))]
-                        inner.push(Pattern::parse(&p)?);
+                        inner.push(Pattern::parse(&p, references, reference_count)?);
                     }
 
                     chars.next(); // skipping the `)`
-                    tokens.push(Group { inner });
-                }                c @ ('+' | '*' | '?') => {
+                    tokens.push(Group { inner, reference });
+                }
+                c @ ('+' | '*' | '?') => {
                     let (min, max) = match c {
                         '*' => (0, usize::MAX),
                         '+' => (1, usize::MAX),
@@ -377,7 +397,7 @@ impl Display for PatternToken {
                     (a, b) => format!("{{{a},{b}}}").fmt(f),
                 }
             }
-            Group { inner } => {
+            Group { reference: _, inner } => {
                 '('.fmt(f)?;
                 inner
                     .iter()
@@ -386,6 +406,10 @@ impl Display for PatternToken {
                     .join("|")
                     .fmt(f)?;
                 ')'.fmt(f)
+            }
+            BackReference { index } => {
+                '\\'.fmt(f)?;
+                index.fmt(f)
             }
         }
     }
@@ -404,32 +428,47 @@ impl<'a, T: fmt::Display + 'a> fmt::Display for SliceDisplay<'a, T> {
 
 /// Determine if an input matches this pattern. The output corresponds to the index at which the
 /// `pattern` have been consumed (i.e. matched)
-fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S) -> Option<usize> {
-    match_loop(pattern, input, true)
+fn matches<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(pattern: P, input: S, references: &[usize]) -> Option<usize> {
+    #[cfg(feature = "verbose")]
+    { match_loop(pattern, input, true, references, &mut HashMap::new(), 1) }
+    #[cfg(not(feature = "verbose"))]
+    { match_loop(pattern, input, true, references, &mut HashMap::new()) }
 }
 
 fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
     pattern: P,
     input: S,
     advance: bool,
+    requested_references: &[usize],
+    captured_references: &mut HashMap<usize, String>,
+    #[cfg(feature = "verbose")] depth: usize,
 ) -> Option<usize> {
     use PatternToken::*;
 
+    #[cfg(feature = "verbose")]
+    let indentation = [INDENTATION].repeat(depth).join("");
+
     let tokens = pattern.as_ref();
+    let chars = input.as_ref();
     let token_count = tokens.len();
+    let char_count = chars.len();
     let mut i = 0;
     let mut j = 0;
-    let chars = input.as_ref();
-    let char_count = chars.len();
+
+    macro_rules! failure_advance {
+        () => {
+            if i == 0 { j += 1; continue; } else { i = 0; continue; }
+        };
+    }
 
     #[cfg(feature = "verbose")]
     {
         println!(
-            "\nMatching '{}' against {:?}",
+            "\n{indentation}Matching '{}' against {:?}",
             SliceDisplay(&tokens),
             input.as_ref().iter().collect::<String>()
         );
-        println!("0 <= i < {token_count}, 0 <= j < {char_count}");
+        println!("{indentation}0 <= i < {token_count}, 0 <= j < {char_count}");
         println!("");
     }
 
@@ -445,46 +484,46 @@ fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
         let token = &tokens[i];
 
         #[cfg(feature = "verbose")]
-        print!("tokens[{i}], chars[{j}]\t");
+        let indentation = format!("{indentation}tokens[{i}], chars[{j}]\t");
         match (&token, c) {
             (Any, _) => {
                 #[cfg(feature = "verbose")]
-                println!("{token:?} <=> {c:?}");
+                println!("{indentation}{token:?} <=> {c:?}");
                 i += 1;
             }
             (AnyDigit, d) if d.is_digit(10) => {
                 #[cfg(feature = "verbose")]
-                println!("{token:?} <=> {d:?}");
+                println!("{indentation}{token:?} <=> {d:?}");
                 i += 1
             }
             (AlphaNumeric, w) if w.is_alphanumeric() || w == '_' => {
                 #[cfg(feature = "verbose")]
-                println!("{token:?} <=> {w:?}");
+                println!("{indentation}{token:?} <=> {w:?}");
                 i += 1
             }
             (Char(a), b) if *a == b => {
                 #[cfg(feature = "verbose")]
-                println!("{token:?} <=> {b:?}");
+                println!("{indentation}{token:?} <=> {b:?}");
                 i += 1
             }
             (Within(cs), c) if cs.contains(&c) => {
                 #[cfg(feature = "verbose")]
-                println!("{token:?} <=> {c:?}");
+                println!("{indentation}{token:?} <=> {c:?}");
                 i += 1
             }
             (Except(cs), c) if !cs.contains(&c) => {
                 #[cfg(feature = "verbose")]
-                println!("{token:?} <=> {c:?}");
+                println!("{indentation}{token:?} <=> {c:?}");
                 i += 1
             }
             (LineBeginning | LineEnding, '\n') => {
                 #[cfg(feature = "verbose")]
-                println!("{token:?} <=> '\\n'");
+                println!("{indentation}{token:?} <=> '\\n'");
                 i += 1
             }
             (LineEnding, '\r') if chars.get(j + 1).map(|&c| c == '\n').unwrap_or(false) => {
                 #[cfg(feature = "verbose")]
-                println!("{token:?} <=>  '\\r\\n'");
+                println!("{indentation}{token:?} <=>  '\\r\\n'");
                 i += 1;
                 j += 1; // accounting for the '\r'
             }
@@ -495,7 +534,15 @@ fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
                 let mut fail = false;
 
                 for _ in 0..min {
-                    let Some(m) = match_loop(inner.as_ref(), &chars[k..], false) else {
+                    let _match = {
+                        #[cfg(feature = "verbose")]
+                        {
+                            match_loop(inner.as_ref(), &chars[k..], false, requested_references, captured_references, depth + 1)
+                        }
+                        #[cfg(not(feature = "verbose"))]
+                        { match_loop(inner.as_ref(), &chars[k..], false, requested_references, captured_references) }
+                    };
+                    let Some(m) = _match else {
                         fail = true;
                         break;
                     };
@@ -504,45 +551,67 @@ fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
                 }
 
                 if fail {
-                    if i == 0 {
-                        j += 1;
-                        continue;
-                    }
-                    i = 0;
-                    continue;
+                    failure_advance!();
                 }
 
                 // the rest of the tokens (a.k.a. epsilon transition)
                 let rest = &tokens[i + 1..];
 
-                for _ in min..max {
-                    if let Some(m) = match_loop(rest, &chars[k..], false) {
-                        // achieved the minimum requirements and the rest of the tokens match
-                        return Some(m);
-                    }
-                    let Some(m) = match_loop(inner.as_ref(), &chars[k..], false) else {
-                        fail = true;
+                // NOTE: innser pattern must be greedy
+                // (i.e. capture as much as possible then pop-backtrack)
+
+                let mut widths = vec![];
+                for _ in 0..max {
+                    if k > char_count {
                         break;
+                    }
+
+                    let _match = {
+                        #[cfg(feature = "verbose")]
+                        { match_loop(inner.as_ref(), &chars[k..], false, requested_references, captured_references, depth + 1) }
+                        #[cfg(not(feature = "verbose"))]
+                        { match_loop(inner.as_ref(), &chars[k..], false, requested_references, captured_references) }
                     };
 
-                    k += m;
+                    if let Some(m) = _match {
+                        widths.push(m);
+                        k += m;
+                    } else {
+                        break;
+                    };
                 }
-                if fail {
-                    if i == 0 {
-                        j += 1;
-                        continue;
+                widths.push(0);
+
+                for w in widths.into_iter().rev() {
+                    k -= w;
+                    let _match = {
+                        #[cfg(feature = "verbose")]
+                        { match_loop(rest, &chars[k..], false, requested_references, captured_references, depth + 1) }
+                        #[cfg(not(feature = "verbose"))]
+                        { match_loop(rest, &chars[k..], false, requested_references, captured_references) }
+                    };
+
+                    if let Some(m) = _match {
+                        // achieved the minimum requirements and the rest of the tokens match
+                        return Some(k + m);
                     }
-                    i = 0;
-                    continue;
                 }
-                j = k;
-                continue;
+
+                failure_advance!();
             }
-            (Group { inner }, _) => {
+            (Group { reference, inner }, _) => {
                 let mut k = j;
                 let mut any_match = false;
                 for inner_pattern in inner.iter() {
-                    if let Some(m) = match_loop(inner_pattern, &chars[k..], false) {
+
+                    let _match =  {
+                        #[cfg(feature = "verbose")]
+                        { match_loop(inner_pattern, &chars[k..], false, requested_references, captured_references, depth + 1) }
+                        #[cfg(not(feature = "verbose"))]
+                        { match_loop(inner_pattern, &chars[k..], false, requested_references, captured_references) }
+                    };
+
+                    if let Some(m) = _match {
                         any_match = true;
                         k += m;
                         break;
@@ -550,32 +619,63 @@ fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
                 }
 
                 if any_match {
+                    if requested_references.contains(reference) {
+                        let captured_reference = chars[j..k].iter().collect::<String>();
+                        #[cfg(feature = "verbose")]
+                        println!("{indentation}CAPTURED: ({reference}, {captured_reference:?})");
+                        *captured_references.entry(*reference).or_default() = captured_reference;
+                    }
+
                     i += 1;
                     j = k;
                     continue;
                 } else {
-                    if i == 0 {
-                        j += 1;
-                        continue;
-                    }
-                    i = 0;
-                    continue;
+                    failure_advance!();
                 }
+            }
+            (BackReference { index }, _) if captured_references.contains_key(index) => {
+                let capture = &captured_references[index];
+                let capture_len = capture.len();
+
+                if capture_len > char_count {
+                    failure_advance!();
+                }
+
+                let mut capture_chars = capture.chars();
+                let mut k = j;
+                let mut match_capture = true;
+                while let Some(c) = capture_chars.next() {
+                    if c != chars[k] {
+                        match_capture = false;
+                        break;
+                    }
+                    k += 1;
+                }
+
+                if !match_capture {
+                    #[cfg(feature = "verbose")]
+                    println!("{indentation} Mismatch BackReference ({index}, {capture:?})");
+                    failure_advance!();
+                }
+                #[cfg(feature = "verbose")]
+                println!("{indentation} Match BackReference ({index}, {capture:?})");
+                i += 1;
+                j = k - 1;
             }
             (_t, _c) if !advance => {
                 #[cfg(feature = "verbose")]
-                println!("{_t:?} <!=> {_c:?}, NO MATCH - early exiting.");
+                println!("{indentation}{_t:?} <!=> {_c:?}, NO MATCH - early exiting.");
                 return None;
             }
             // the beginning doesn't match
             (_t, _c) if i == 0 => {
                 #[cfg(feature = "verbose")]
-                println!("{_t:?} <!=> {_c:?}, advancing...");
+                println!("{indentation}{_t:?} <!=> {_c:?}, advancing...");
             }
             // try matching the pattern from the beginning
             (_t, _c) => {
                 #[cfg(feature = "verbose")]
-                println!("{_t:?} <!=> {_c:?}, trying pattern beginning");
+                println!("{indentation}{_t:?} <!=> {_c:?}, trying pattern beginning");
                 last_failure += 1;
                 j = last_failure;
                 i = 0;
@@ -595,11 +695,11 @@ fn match_loop<P: AsRef<[PatternToken]>, S: AsRef<[char]>>(
 
     if consumed_tokens {
         #[cfg(feature = "verbose")]
-        println!("MATCH");
+        println!("{indentation}MATCH");
         Some(j)
     } else {
         #[cfg(feature = "verbose")]
-        println!("NO MATCH");
+        println!("{indentation}NO MATCH");
         None
     }
 }
@@ -630,7 +730,12 @@ fn main() -> anyhow::Result<()> {
         exit(1)
     };
 
-    let pattern = Pattern::from_str(&pattern)?;
+    let mut references = vec![];
+    let mut reference_count = 0;
+    #[cfg(feature = "verbose")]
+    let pattern = Pattern::parse(&pattern, &mut references, &mut reference_count, 1)?;
+    #[cfg(not(feature = "verbose"))]
+    let pattern = Pattern::parse(&pattern, &mut references, &mut reference_count)?;
 
     let mut input_line = String::new();
 
@@ -639,13 +744,14 @@ fn main() -> anyhow::Result<()> {
     #[cfg(feature = "verbose")]
     {
         println!("");
-        println!("pattern tokens:  {pattern:?}");
-        println!("pattern display: {pattern}");
-        println!("input:           {input_line:?}");
+        println!("requested backrefereces:  {references:?}");
+        println!("pattern tokens:           {pattern:#?}");
+        println!("pattern display:          {pattern}");
+        println!("input:                    {input_line:?}");
         println!("");
     }
 
-    if matches(pattern.tokens, input_line.chars().collect::<Vec<char>>()).is_none() {
+    if matches(pattern.tokens, input_line.chars().collect::<Vec<char>>(), &references).is_none() {
         exit(1)
     }
 
@@ -658,18 +764,22 @@ mod test {
 
     macro_rules! succ {
         ($pattern: literal, $($case: literal),*) => {
-            let pattern = Pattern::from_str($pattern).unwrap();
+            let mut references = vec![];
+            let mut reference_count = 0;
+            let pattern = Pattern::parse($pattern, &mut references, &mut reference_count).unwrap();
             $(
-                assert!(matches(&pattern, $case.chars().collect::<Vec<_>>()).is_some());
+                assert!(matches(&pattern, $case.chars().collect::<Vec<_>>(), &references).is_some());
             )*
         };
     }
 
     macro_rules! fail {
         ($pattern: literal, $($case: literal),*) => {
-            let pattern = Pattern::from_str($pattern).unwrap();
+            let mut references = vec![];
+            let mut reference_count = 0;
+            let pattern = Pattern::parse($pattern, &mut references, &mut reference_count).unwrap();
             $(
-                assert!(matches(&pattern, $case.chars().collect::<Vec<_>>()).is_none());
+                assert!(matches(&pattern, $case.chars().collect::<Vec<_>>(), &references).is_none());
             )*
         };
     }
